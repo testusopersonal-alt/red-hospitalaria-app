@@ -18,5 +18,5 @@ npm-debug.log*
 *.tmp
 *.log
 
-# Ignorar el archivo de prueba si lo usaste
+
 test.js
