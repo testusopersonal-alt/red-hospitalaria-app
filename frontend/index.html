@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clínicas La Perla</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; }
+        .app { display: flex; min-height: 100vh; }
+        .sidebar { width: 260px; background-color: #2c3e50; color: white; padding: 20px 0; position: fixed; height: 100vh; overflow-y: auto; }
+        .sidebar h2 { text-align: center; margin-bottom: 30px; font-size: 1.4rem; }
+        .sidebar nav a { display: block; padding: 12px 20px; color: #ecf0f1; text-decoration: none; transition: 0.3s; cursor: pointer; }
+        .sidebar nav a:hover, .sidebar nav a.active { background-color: #1abc9c; color: white; }
+        .main-content { margin-left: 260px; flex: 1; padding: 20px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #ddd; }
+        th { background-color: #1abc9c; color: white; }
+        button, .btn { background-color: #1abc9c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 5px; }
+        button:hover { background-color: #16a085; }
+        .btn-danger { background-color: #e74c3c; }
+        .btn-danger:hover { background-color: #c0392b; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .search-bar { margin-bottom: 20px; display: flex; gap: 10px; }
+        .search-bar input { flex: 1; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: white; padding: 20px; border-radius: 8px; width: 500px; max-width: 90%; }
+        .close { float: right; cursor: pointer; font-size: 24px; }
+        .login-container { display: flex; justify-content: center; align-items: center; height: 100vh; background: #2c3e50; }
+        .login-card { background: white; padding: 30px; border-radius: 8px; width: 350px; text-align: center; }
+        .header-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: white; padding: 10px 20px; border-radius: 8px; }
+        .hidden { display: none; }
+        .chart-container { width: 100%; max-width: 600px; margin: 0 auto; }
+    </style>
+</head>
+<body>
+
+<div id="loginSection" class="login-container">
+    <div class="login-card">
+        <h2>Clínicas La Perla</h2>
+        <div class="form-group"><label>Usuario</label><input type="text" id="loginUsuario"></div>
+        <div class="form-group"><label>Contraseña</label><input type="password" id="loginClave"></div>
+        <button id="btnLogin">Iniciar sesión</button>
+        <p id="loginError" style="color:red;margin-top:10px;"></p>
+    </div>
+</div>
+
+<div id="appSection" class="app hidden">
+    <div class="sidebar">
+        <h2>🏥 La Perla</h2>
+        <nav>
+            <a data-view="inicio">📊 Inicio</a>
+            <a data-view="pacientes">👥 Pacientes</a>
+            <a data-view="medicos">👨‍⚕️ Médicos</a>
+            <a data-view="citas">📅 Citas</a>
+            <a data-view="farmacia">💊 Farmacia</a>
+            <a data-view="facturacion">💰 Facturación</a>
+            <a data-view="reportes">📈 Reportes</a>
+            <a data-view="usuarios">👤 Usuarios</a>
+            <a id="btnLogout">🚪 Cerrar sesión</a>
+        </nav>
+    </div>
+    <div class="main-content">
+        <div class="header-info">
+            <span>Bienvenido, <strong id="nombreUsuario"></strong> (<span id="rolUsuario"></span>)</span>
+        </div>
+        <div id="viewContainer" class="card"></div>
+    </div>
+</div>
+
+<script>
+// ============================================================
+// PILAR 1 — ABSTRACCIÓN
+// ApiClient oculta cómo se hace cada petición HTTP.
+// El resto del código nunca escribe fetch() directamente.
+// ============================================================
+class ApiClient {
+    async get(url) {
+        const res = await fetch(url);
+        return res.json();
+    }
+    async post(url, body) {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        return res.ok ? res.json() : Promise.reject(await res.json());
+    }
+    async put(url, body) {
+        const res = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        return res.json();
+    }
+    async delete(url) {
+        const res = await fetch(url, { method: 'DELETE' });
+        return res.json();
+    }
+}
+const api = new ApiClient(); // Instancia única compartida
+
+
+// ============================================================
+// PILAR 2 — ENCAPSULAMIENTO
+// BaseView gestiona el modal internamente.
+// Los hijos nunca manipulan el DOM del modal directamente;
+// solo llaman a this._openModal() / this._closeModal().
+// ============================================================
+class BaseView {
+    constructor(container) {
+        this.container = container; // Datos internos protegidos
+    }
+
+    // Método protegido — solo lo usan las subclases
+    _openModal(modalId) {
+        document.getElementById(modalId).style.display = 'flex';
+    }
+
+    _closeModal(modalId) {
+        document.getElementById(modalId).style.display = 'none';
+    }
+
+    _bindClose(modalId) {
+        document.querySelector(`#${modalId} .close`).onclick = () => this._closeModal(modalId);
+    }
+
+    // Método abstracto que cada vista debe implementar (contrato)
+    render() {
+        throw new Error('render() debe ser implementado por la subclase');
+    }
+}
+
+
+// ============================================================
+// PILAR 3 — HERENCIA
+// Cada vista hereda de BaseView y reutiliza _openModal,
+// _closeModal y _bindClose sin repetir código.
+// ============================================================
+
+class PacientesView extends BaseView {
+    async render() {
+        this.container.innerHTML = `
+            <h2>Gestión de Pacientes</h2>
+            <div class="search-bar">
+                <input type="text" id="searchPaciente" placeholder="Buscar por nombre, apellido o teléfono...">
+                <button id="btnBuscarPaciente">Buscar</button>
+                <button id="btnNuevoPaciente">+ Nuevo Paciente</button>
+            </div>
+            <table id="tablaPacientes">
+                <thead><tr><th>ID</th><th>Nombres</th><th>Apellidos</th><th>Teléfono</th><th>Correo</th><th>Acciones</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div id="modalPaciente" class="modal">
+                <div class="modal-content">
+                    <span class="close">&times;</span>
+                    <h3 id="modalTitlePaciente">Paciente</h3>
+                    <input type="hidden" id="pacienteId">
+                    <div class="form-group"><label>Nombres</label><input id="pacNombres"></div>
+                    <div class="form-group"><label>Apellidos</label><input id="pacApellidos"></div>
+                    <div class="form-group"><label>Fecha Nacimiento</label><input type="date" id="pacFechaNac"></div>
+                    <div class="form-group"><label>Sexo</label><select id="pacSexo"><option>M</option><option>F</option></select></div>
+                    <div class="form-group"><label>Teléfono</label><input id="pacTelefono"></div>
+                    <div class="form-group"><label>Dirección</label><input id="pacDireccion"></div>
+                    <div class="form-group"><label>Correo</label><input id="pacCorreo"></div>
+                    <button id="btnSavePaciente">Guardar</button>
+                </div>
+            </div>`;
+
+        await this._cargar('');
+        this._bindClose('modalPaciente');
+        document.getElementById('btnBuscarPaciente').onclick = () =>
+            this._cargar(document.getElementById('searchPaciente').value);
+        document.getElementById('btnNuevoPaciente').onclick = () => this._abrirNuevo();
+        document.getElementById('btnSavePaciente').onclick  = () => this._guardar();
+    }
+
+    async _cargar(q = '') {
+        const url = q ? `/api/pacientes/buscar?q=${encodeURIComponent(q)}` : '/api/pacientes';
+        const data = await api.get(url);
+        const tbody = document.querySelector('#tablaPacientes tbody');
+        tbody.innerHTML = '';
+        data.forEach(p => {
+            const row = tbody.insertRow();
+            [p[0], p[1], p[2], p[5], p[7]].forEach(v => row.insertCell().innerText = v);
+            row.insertCell().innerHTML =
+                `<button onclick="app.views.pacientes._editar(${p[0]})">Editar</button>
+                 <button class="btn-danger" onclick="app.views.pacientes._eliminar(${p[0]})">Eliminar</button>`;
+        });
+    }
+
+    _abrirNuevo() {
+        ['pacienteId','pacNombres','pacApellidos','pacFechaNac','pacTelefono','pacDireccion','pacCorreo']
+            .forEach(id => document.getElementById(id).value = '');
+        document.getElementById('pacSexo').value = 'M';
+        document.getElementById('modalTitlePaciente').innerText = 'Nuevo Paciente';
+        this._openModal('modalPaciente');
+    }
+
+    async _editar(id) {
+        const todos = await api.get('/api/pacientes');
+        const p = todos.find(p => p[0] == id);
+        if (!p) return;
+        document.getElementById('pacienteId').value   = p[0];
+        document.getElementById('pacNombres').value   = p[1];
+        document.getElementById('pacApellidos').value = p[2];
+        document.getElementById('pacFechaNac').value  = p[3] ? p[3].substring(0,10) : '';
+        document.getElementById('pacSexo').value      = p[4];
+        document.getElementById('pacTelefono').value  = p[5];
+        document.getElementById('pacDireccion').value = p[6];
+        document.getElementById('pacCorreo').value    = p[7];
+        document.getElementById('modalTitlePaciente').innerText = 'Editar Paciente';
+        this._openModal('modalPaciente');
+    }
+
+    async _eliminar(id) {
+        if (!confirm('¿Eliminar paciente?')) return;
+        await api.delete(`/api/pacientes/${id}`);
+        this._cargar(document.getElementById('searchPaciente').value);
+    }
+
+    async _guardar() {
+        const id = document.getElementById('pacienteId').value;
+        const data = {
+            nombres:          document.getElementById('pacNombres').value,
+            apellidos:        document.getElementById('pacApellidos').value,
+            fecha_nacimiento: document.getElementById('pacFechaNac').value,
+            sexo:             document.getElementById('pacSexo').value,
+            telefono:         document.getElementById('pacTelefono').value,
+            direccion:        document.getElementById('pacDireccion').value,
+            correo:           document.getElementById('pacCorreo').value
+        };
+        if (id) await api.put(`/api/pacientes/${id}`, data);
+        else    await api.post('/api/pacientes', data);
+        this._closeModal('modalPaciente');
+        this._cargar(document.getElementById('searchPaciente').value);
+    }
+}
+
+class MedicosView extends BaseView {
+    async render() {
+        // Cargar especialidades primero para poblar el select
+        let especialidades = [];
+        try { especialidades = await api.get('/api/especialidades'); } catch(e) {}
+
+        const optsEsp = especialidades.length
+            ? especialidades.map(e => `<option value="${e[0]}">${e[1]}</option>`).join('')
+            : '<option value="">— sin datos —</option>';
+
+        this.container.innerHTML = `
+            <h2>Gestión de Médicos</h2>
+            <button id="btnNuevoMedico">+ Nuevo Médico</button>
+            <table id="tablaMedicos">
+                <thead><tr><th>ID</th><th>Nombres</th><th>Apellidos</th><th>Teléfono</th><th>Correo</th><th>Especialidad</th><th>Acciones</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div id="modalMedico" class="modal"><div class="modal-content">
+                <span class="close">&times;</span><h3>Médico</h3>
+                <input type="hidden" id="medicoId">
+                <div class="form-group"><label>Nombres</label><input id="medNombres"></div>
+                <div class="form-group"><label>Apellidos</label><input id="medApellidos"></div>
+                <div class="form-group"><label>Teléfono</label><input id="medTelefono"></div>
+                <div class="form-group"><label>Correo</label><input id="medCorreo"></div>
+                <div class="form-group"><label>Especialidad</label>
+                    <select id="medEspecialidad">${optsEsp}</select>
+                </div>
+                <button id="btnSaveMedico">Guardar</button>
+            </div></div>`;
+
+        await this._cargar();
+        this._bindClose('modalMedico');
+        document.getElementById('btnNuevoMedico').onclick  = () => this._abrirNuevo();
+        document.getElementById('btnSaveMedico').onclick   = () => this._guardar();
+    }
+
+    async _cargar() {
+        const data = await api.get('/api/medicos');
+        const tbody = document.querySelector('#tablaMedicos tbody');
+        tbody.innerHTML = '';
+        data.forEach(m => {
+            const row = tbody.insertRow();
+            // m[5] es el nombre de especialidad (del JOIN) — solo para mostrar
+            [m[0],m[1],m[2],m[3],m[4],m[5]].forEach(v => row.insertCell().innerText = v);
+            row.insertCell().innerHTML =
+                `<button onclick="app.views.medicos._editar(${m[0]}, ${m[6]})">Editar</button>
+                 <button class="btn-danger" onclick="app.views.medicos._eliminar(${m[0]})">Eliminar</button>`;
+        });
+    }
+
+    _abrirNuevo() {
+        ['medicoId','medNombres','medApellidos','medTelefono','medCorreo']
+            .forEach(id => document.getElementById(id).value = '');
+        this._openModal('modalMedico');
+    }
+
+    // Recibe el id_especialidad directamente desde la fila — sin hacer otra petición
+    async _editar(id, idEspecialidad) {
+        const todos = await api.get('/api/medicos');
+        const m = todos.find(m => m[0] == id);
+        if (!m) return;
+        document.getElementById('medicoId').value       = m[0];
+        document.getElementById('medNombres').value     = m[1];
+        document.getElementById('medApellidos').value   = m[2];
+        document.getElementById('medTelefono').value    = m[3];
+        document.getElementById('medCorreo').value      = m[4];
+        // m[6] = id_especialidad (viene del backend), m[5] = nombre (para mostrar)
+        document.getElementById('medEspecialidad').value = idEspecialidad || m[6] || '';
+        this._openModal('modalMedico');
+    }
+
+    async _eliminar(id) {
+        if (!confirm('¿Eliminar médico?')) return;
+        await api.delete(`/api/medicos/${id}`);
+        this._cargar();
+    }
+
+    async _guardar() {
+        const id   = document.getElementById('medicoId').value;
+        const data = {
+            nombres:        document.getElementById('medNombres').value,
+            apellidos:      document.getElementById('medApellidos').value,
+            telefono:       document.getElementById('medTelefono').value,
+            correo:         document.getElementById('medCorreo').value,
+            id_especialidad:document.getElementById('medEspecialidad').value
+        };
+        if (id) await api.put(`/api/medicos/${id}`, data);
+        else    await api.post('/api/medicos', data);
+        this._closeModal('modalMedico');
+        this._cargar();
+    }
+}
+
+class CitasView extends BaseView {
+    async render() {
+        this.container.innerHTML = `
+            <h2>Citas Médicas</h2>
+            <button id="btnNuevaCita">+ Agendar cita</button>
+            <table id="tablaCitas">
+                <thead><tr><th>ID</th><th>Fecha</th><th>Paciente</th><th>Médico</th><th>Motivo</th><th>Estado</th><th>Acciones</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div id="modalCita" class="modal"><div class="modal-content">
+                <span class="close">&times;</span><h3>Agendar Cita</h3>
+                <div class="form-group"><label>Paciente ID</label><input id="citaPaciente"></div>
+                <div class="form-group"><label>Médico ID</label><input id="citaMedico"></div>
+                <div class="form-group"><label>Fecha y hora (YYYY-MM-DD HH:MI:SS)</label><input id="citaFecha"></div>
+                <div class="form-group"><label>Motivo</label><input id="citaMotivo"></div>
+                <div class="form-group"><label>Consultorio ID</label><input id="citaConsultorio"></div>
+                <div class="form-group"><label>Turno ID</label><input id="citaTurno"></div>
+                <button id="btnSaveCita">Agendar</button>
+            </div></div>`;
+
+        await this._cargar();
+        this._bindClose('modalCita');
+        document.getElementById('btnNuevaCita').onclick = () => this._abrirNuevo();
+        document.getElementById('btnSaveCita').onclick  = () => this._guardar();
+    }
+
+    async _cargar() {
+        const data  = await api.get('/api/citas');
+        const tbody = document.querySelector('#tablaCitas tbody');
+        tbody.innerHTML = '';
+        data.forEach(c => {
+            const row = tbody.insertRow();
+            [c[0],c[1],c[4],c[5],c[2],c[3]].forEach(v => row.insertCell().innerText = v);
+            row.insertCell().innerHTML =
+                `<button onclick="app.views.citas._cambiarEstado(${c[0]},'CANCELADA')">Cancelar</button>
+                 <button onclick="app.views.citas._cambiarEstado(${c[0]},'ATENDIDA')">Atender</button>`;
+        });
+    }
+
+    _abrirNuevo() {
+        ['citaPaciente','citaMedico','citaFecha','citaMotivo','citaConsultorio','citaTurno']
+            .forEach(id => document.getElementById(id).value = '');
+        this._openModal('modalCita');
+    }
+
+    async _cambiarEstado(id, estado) {
+        await api.put(`/api/citas/${id}/estado`, { estado_cita: estado });
+        this._cargar();
+    }
+
+    async _guardar() {
+        await api.post('/api/citas/agendar', {
+            id_paciente:    document.getElementById('citaPaciente').value,
+            id_medico:      document.getElementById('citaMedico').value,
+            fecha_hora:     document.getElementById('citaFecha').value,
+            motivo:         document.getElementById('citaMotivo').value,
+            id_consultorio: document.getElementById('citaConsultorio').value,
+            id_turno:       document.getElementById('citaTurno').value
+        });
+        this._closeModal('modalCita');
+        this._cargar();
+    }
+}
+
+class FarmaciaView extends BaseView {
+    async render() {
+        this.container.innerHTML = `
+            <h2>Farmacia - Medicamentos</h2>
+            <button id="btnNuevoMedicamento">+ Nuevo Medicamento</button>
+            <table id="tablaMedicamentos">
+                <thead><tr><th>ID</th><th>Nombre</th><th>Descripción</th><th>Precio</th><th>Stock</th><th>Acciones</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div id="modalMedicamento" class="modal"><div class="modal-content">
+                <span class="close">&times;</span><h3>Medicamento</h3>
+                <input type="hidden" id="medicamentoId">
+                <div class="form-group"><label>Nombre</label><input id="medNombre"></div>
+                <div class="form-group"><label>Descripción</label><input id="medDescripcion"></div>
+                <div class="form-group"><label>Precio</label><input id="medPrecio"></div>
+                <div class="form-group"><label>Stock</label><input id="medStock"></div>
+                <button id="btnSaveMedicamento">Guardar</button>
+            </div></div>`;
+
+        await this._cargar();
+        this._bindClose('modalMedicamento');
+        document.getElementById('btnNuevoMedicamento').onclick = () => this._abrirNuevo();
+        document.getElementById('btnSaveMedicamento').onclick  = () => this._guardar();
+    }
+
+    async _cargar() {
+        const data  = await api.get('/api/medicamentos');
+        const tbody = document.querySelector('#tablaMedicamentos tbody');
+        tbody.innerHTML = '';
+        data.forEach(m => {
+            const row = tbody.insertRow();
+            [m[0],m[1],m[2],m[3],m[4]].forEach(v => row.insertCell().innerText = v);
+            row.insertCell().innerHTML =
+                `<button onclick="app.views.farmacia._editar(${m[0]})">Editar</button>
+                 <button class="btn-danger" onclick="app.views.farmacia._eliminar(${m[0]})">Eliminar</button>`;
+        });
+    }
+
+    _abrirNuevo() {
+        ['medicamentoId','medNombre','medDescripcion','medPrecio','medStock']
+            .forEach(id => document.getElementById(id).value = '');
+        this._openModal('modalMedicamento');
+    }
+
+    async _editar(id) {
+        const todos = await api.get('/api/medicamentos');
+        const m = todos.find(m => m[0] == id);
+        if (!m) return;
+        document.getElementById('medicamentoId').value  = m[0];
+        document.getElementById('medNombre').value      = m[1];
+        document.getElementById('medDescripcion').value = m[2];
+        document.getElementById('medPrecio').value      = m[3];
+        document.getElementById('medStock').value       = m[4];
+        this._openModal('modalMedicamento');
+    }
+
+    async _eliminar(id) {
+        if (!confirm('¿Eliminar medicamento?')) return;
+        await api.delete(`/api/medicamentos/${id}`);
+        this._cargar();
+    }
+
+    async _guardar() {
+        const id   = document.getElementById('medicamentoId').value;
+        const data = {
+            nombre:        document.getElementById('medNombre').value,
+            descripcion:   document.getElementById('medDescripcion').value,
+            precio_actual: document.getElementById('medPrecio').value,
+            stock_actual:  document.getElementById('medStock').value
+        };
+        if (id) await api.put(`/api/medicamentos/${id}`, data);
+        else    await api.post('/api/medicamentos', data);
+        this._closeModal('modalMedicamento');
+        this._cargar();
+    }
+}
+
+class FacturacionView extends BaseView {
+    constructor(container) {
+        super(container);
+        // Guardamos las facturas en memoria para el modal de detalle
+        this._facturas = [];
+    }
+
+    async render() {
+        this.container.innerHTML = `
+            <h2>Facturación</h2>
+            <button id="btnNuevaFactura">+ Nueva Factura</button>
+            <table id="tablaFacturas">
+                <thead><tr><th>ID</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Detalle</th></tr></thead>
+                <tbody></tbody>
+            </table>
+
+            <!-- Modal: nueva factura -->
+            <div id="modalFactura" class="modal"><div class="modal-content">
+                <span class="close">&times;</span><h3>Nueva Factura</h3>
+                <div class="form-group"><label>Paciente ID</label><input id="factPaciente"></div>
+                <div class="form-group"><label>Concepto</label><input id="factConcepto"></div>
+                <div class="form-group"><label>Cantidad</label><input id="factCantidad" type="number" min="1"></div>
+                <div class="form-group"><label>Precio unitario</label><input id="factPrecio" type="number" step="0.01"></div>
+                <button id="btnSaveFactura">Crear Factura</button>
+            </div></div>
+
+            <!-- Modal: detalle de factura (estilo recibo) -->
+            <div id="modalDetalle" class="modal">
+                <div class="modal-content" style="width:560px;">
+                    <span class="close" id="closeDetalle">&times;</span>
+
+                    <!-- Encabezado del recibo -->
+                    <div style="text-align:center; border-bottom:2px solid #1abc9c; padding-bottom:12px; margin-bottom:16px;">
+                        <h2 style="color:#2c3e50; margin:0;">🏥 Clínicas La Perla</h2>
+                        <p style="color:#7f8c8d; margin:4px 0 0;">Comprobante de pago</p>
+                    </div>
+
+                    <!-- Datos generales -->
+                    <div style="display:flex; justify-content:space-between; margin-bottom:16px; font-size:0.9rem; color:#555;">
+                        <div>
+                            <div><strong>Factura #:</strong> <span id="detFactId"></span></div>
+                            <div><strong>Paciente:</strong> <span id="detFactPaciente"></span></div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div><strong>Fecha:</strong> <span id="detFactFecha"></span></div>
+                        </div>
+                    </div>
+
+                    <!-- Tabla de líneas -->
+                    <table id="tablaDetalle" style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                        <thead>
+                            <tr style="background:#1abc9c; color:white;">
+                                <th style="padding:8px; text-align:left;">Concepto</th>
+                                <th style="padding:8px; text-align:center;">Cant.</th>
+                                <th style="padding:8px; text-align:right;">Precio unit.</th>
+                                <th style="padding:8px; text-align:right;">Subtotal</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detalleLineas"></tbody>
+                    </table>
+
+                    <!-- Total -->
+                    <div style="border-top:2px solid #1abc9c; margin-top:12px; padding-top:10px; text-align:right;">
+                        <span style="font-size:1.1rem; font-weight:bold; color:#2c3e50;">
+                            TOTAL: Q <span id="detFactTotal"></span>
+                        </span>
+                    </div>
+
+                    <!-- Pie -->
+                    <p style="text-align:center; color:#bdc3c7; font-size:0.8rem; margin-top:16px;">
+                        Gracias por su confianza — Clínicas La Perla
+                    </p>
+                </div>
+            </div>`;
+
+        await this._cargar();
+        this._bindClose('modalFactura');
+        document.getElementById('closeDetalle').onclick = () => this._closeModal('modalDetalle');
+        document.getElementById('btnNuevaFactura').onclick = () => this._abrirNuevo();
+        document.getElementById('btnSaveFactura').onclick  = () => this._guardar();
+    }
+
+    async _cargar() {
+        this._facturas = await api.get('/api/facturas');
+        const tbody = document.querySelector('#tablaFacturas tbody');
+        tbody.innerHTML = '';
+        this._facturas.forEach(f => {
+            const row = tbody.insertRow();
+            // f = [id, fecha, total, paciente]
+            [f[0], f[1], f[3], `Q ${parseFloat(f[2]).toFixed(2)}`].forEach(v => row.insertCell().innerText = v);
+            row.insertCell().innerHTML =
+                `<button onclick="app.views.facturacion._verDetalle(${f[0]})">🧾 Ver detalle</button>`;
+        });
+    }
+
+    _abrirNuevo() {
+        ['factPaciente','factConcepto','factCantidad','factPrecio']
+            .forEach(id => document.getElementById(id).value = '');
+        this._openModal('modalFactura');
+    }
+
+    async _verDetalle(id) {
+        // Buscar datos del encabezado en memoria (sin hacer otra petición)
+        const factura = this._facturas.find(f => f[0] == id);
+        const lineas  = await api.get(`/api/facturas/${id}/detalle`);
+
+        // Poblar encabezado
+        document.getElementById('detFactId').innerText      = id;
+        document.getElementById('detFactPaciente').innerText = factura ? factura[3] : '—';
+        document.getElementById('detFactFecha').innerText    = factura ? factura[1] : '—';
+        document.getElementById('detFactTotal').innerText    = factura ? parseFloat(factura[2]).toFixed(2) : '—';
+
+        // Poblar líneas del detalle
+        // detalle_factura: [id_detalle, id_factura, concepto, cantidad, precio_unitario]
+        const tbody = document.getElementById('detalleLineas');
+        tbody.innerHTML = '';
+        if (lineas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:12px;color:#999;">Sin líneas de detalle</td></tr>';
+        } else {
+            lineas.forEach(l => {
+                const concepto  = l[2];
+                const cantidad  = parseFloat(l[3]);
+                const precio    = parseFloat(l[4]);
+                const subtotal  = (cantidad * precio).toFixed(2);
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid #eee';
+                tr.innerHTML = `
+                    <td style="padding:8px;">${concepto}</td>
+                    <td style="padding:8px; text-align:center;">${cantidad}</td>
+                    <td style="padding:8px; text-align:right;">Q ${precio.toFixed(2)}</td>
+                    <td style="padding:8px; text-align:right;">Q ${subtotal}</td>`;
+                tbody.appendChild(tr);
+            });
+        }
+
+        this._openModal('modalDetalle');
+    }
+
+    async _guardar() {
+        await api.post('/api/facturas', {
+            id_paciente:    document.getElementById('factPaciente').value,
+            concepto:       document.getElementById('factConcepto').value,
+            cantidad:       document.getElementById('factCantidad').value,
+            precio_unitario:document.getElementById('factPrecio').value
+        });
+        this._closeModal('modalFactura');
+        this._cargar();
+    }
+}
+
+class ReportesView extends BaseView {
+    async render() {
+        this.container.innerHTML = `
+            <h2>Reportes Gerenciales</h2>
+            <div style="display:flex;flex-wrap:wrap;">
+                <div class="chart-container"><canvas id="chartCitas"></canvas></div>
+                <div class="chart-container"><canvas id="chartTopPacientes"></canvas></div>
+            </div>`;
+
+        const dataCitas = await api.get('/api/reportes/citas-por-medico');
+        new Chart(document.getElementById('chartCitas').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels:   dataCitas.map(d => d[0]),
+                datasets: [{ label: 'Citas por médico', data: dataCitas.map(d => d[2]), backgroundColor: '#1abc9c' }]
+            }
+        });
+
+        const dataTop = await api.get('/api/reportes/top-pacientes');
+        new Chart(document.getElementById('chartTopPacientes').getContext('2d'), {
+            type: 'pie',
+            data: {
+                labels:   dataTop.map(d => d[0]),
+                datasets: [{ data: dataTop.map(d => d[1]), backgroundColor: ['#3498db','#e74c3c','#f1c40f','#2ecc71','#9b59b6'] }]
+            }
+        });
+    }
+}
+
+class UsuariosView extends BaseView {
+    async render() {
+        this.container.innerHTML = `
+            <h2>Usuarios del Sistema</h2>
+            <button id="btnNuevoUsuario">+ Nuevo Usuario</button>
+            <table id="tablaUsuarios">
+                <thead><tr><th>ID</th><th>Usuario</th><th>Rol</th><th>Acciones</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <div id="modalUsuario" class="modal"><div class="modal-content">
+                <span class="close">&times;</span><h3>Usuario</h3>
+                <input type="hidden" id="usuarioId">
+                <div class="form-group"><label>Usuario</label><input id="userUsuario"></div>
+                <div class="form-group"><label>Clave</label><input type="password" id="userClave"></div>
+                <div class="form-group"><label>Rol</label>
+                    <select id="userRol"><option>ADMIN</option><option>MEDICO</option><option>RECEPCION</option></select>
+                </div>
+                <button id="btnSaveUsuario">Guardar</button>
+            </div></div>`;
+
+        await this._cargar();
+        this._bindClose('modalUsuario');
+        document.getElementById('btnNuevoUsuario').onclick = () => this._abrirNuevo();
+        document.getElementById('btnSaveUsuario').onclick  = () => this._guardar();
+    }
+
+    async _cargar() {
+        const data  = await api.get('/api/usuarios');
+        const tbody = document.querySelector('#tablaUsuarios tbody');
+        tbody.innerHTML = '';
+        data.forEach(u => {
+            const row = tbody.insertRow();
+            [u[0],u[1],u[2]].forEach(v => row.insertCell().innerText = v);
+            row.insertCell().innerHTML =
+                `<button onclick="app.views.usuarios._editar(${u[0]})">Editar</button>
+                 <button class="btn-danger" onclick="app.views.usuarios._eliminar(${u[0]})">Eliminar</button>`;
+        });
+    }
+
+    _abrirNuevo() {
+        ['usuarioId','userUsuario','userClave'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('userRol').value = 'RECEPCION';
+        this._openModal('modalUsuario');
+    }
+
+    async _editar(id) {
+        const todos = await api.get('/api/usuarios');
+        const u = todos.find(u => u[0] == id);
+        if (!u) return;
+        document.getElementById('usuarioId').value  = u[0];
+        document.getElementById('userUsuario').value = u[1];
+        document.getElementById('userClave').value   = '';
+        document.getElementById('userRol').value     = u[2];
+        this._openModal('modalUsuario');
+    }
+
+    async _eliminar(id) {
+        if (!confirm('¿Eliminar usuario?')) return;
+        await api.delete(`/api/usuarios/${id}`);
+        this._cargar();
+    }
+
+    async _guardar() {
+        const id    = document.getElementById('usuarioId').value;
+        const clave = document.getElementById('userClave').value;
+        const data  = {
+            usuario: document.getElementById('userUsuario').value,
+            rol:     document.getElementById('userRol').value
+        };
+        // Al editar, solo incluir la clave si el usuario escribió una nueva
+        // Si se deja vacía, el backend conserva la clave actual
+        if (!id || clave) data.clave = clave;
+        if (id) await api.put(`/api/usuarios/${id}`, data);
+        else    await api.post('/api/usuarios', data);
+        this._closeModal('modalUsuario');
+        this._cargar();
+    }
+}
+
+class InicioView extends BaseView {
+    async render() {
+        this.container.innerHTML = `<h2>Dashboard</h2><p>Bienvenido al sistema de gestión hospitalaria.</p>`;
+    }
+}
+
+
+// ============================================================
+// PILAR 4 — POLIMORFISMO
+// App llama al mismo método .render() en cada vista.
+// No sabe (ni le importa) si es PacientesView o ReportesView.
+// Cada una responde diferente al mismo mensaje.
+// ============================================================
+class App {
+    constructor() {
+        this.currentUser = null;
+        // Registro de vistas — cada una es un objeto diferente
+        // pero todas responden a render()
+        this.views = {
+            inicio:      new InicioView(this._container()),
+            pacientes:   new PacientesView(this._container()),
+            medicos:     new MedicosView(this._container()),
+            citas:       new CitasView(this._container()),
+            farmacia:    new FarmaciaView(this._container()),
+            facturacion: new FacturacionView(this._container()),
+            reportes:    new ReportesView(this._container()),
+            usuarios:    new UsuariosView(this._container()),
+        };
+    }
+
+    _container() {
+        return document.getElementById('viewContainer');
+    }
+
+    async navigateTo(viewName) {
+        document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.remove('active'));
+        const link = document.querySelector(`.sidebar nav a[data-view="${viewName}"]`);
+        if (link) link.classList.add('active');
+
+        // POLIMORFISMO: mismo mensaje render(), distinto comportamiento
+        const view = this.views[viewName];
+        if (view) {
+            view.container = this._container(); // actualizar referencia
+            await view.render();
+        }
+    }
+
+    async login(usuario, clave) {
+        try {
+            const user = await api.post('/api/login', { usuario, clave });
+            this.currentUser = user;
+            document.getElementById('nombreUsuario').innerText = user.usuario;
+            document.getElementById('rolUsuario').innerText    = user.rol;
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('appSection').classList.remove('hidden');
+            await this.navigateTo('inicio');
+        } catch {
+            document.getElementById('loginError').innerText = 'Credenciales incorrectas';
+        }
+    }
+
+    logout() {
+        this.currentUser = null;
+        document.getElementById('loginSection').classList.remove('hidden');
+        document.getElementById('appSection').classList.add('hidden');
+        document.getElementById('loginUsuario').value = '';
+        document.getElementById('loginClave').value   = '';
+        document.getElementById('loginError').innerText = '';
+    }
+
+    init() {
+        document.getElementById('btnLogin').onclick = () =>
+            this.login(
+                document.getElementById('loginUsuario').value,
+                document.getElementById('loginClave').value
+            );
+        document.getElementById('btnLogout').onclick = () => this.logout();
+        document.querySelectorAll('.sidebar nav a[data-view]').forEach(link => {
+            link.addEventListener('click', e => {
+                e.preventDefault();
+                this.navigateTo(link.getAttribute('data-view'));
+            });
+        });
+    }
+}
+
+// Punto de entrada único
+const app = new App();
+app.init();
+</script>
+</body>
+</html>

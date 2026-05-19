@@ -1,0 +1,22 @@
+# Dependencias de Node.js
+node_modules/
+.env        # por seguridad, no subas tus credenciales
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+
+# Archivos temporales de Oracle
+*.tmp
+*.log
+
+# Ignorar el archivo de prueba si lo usaste
+test.js
