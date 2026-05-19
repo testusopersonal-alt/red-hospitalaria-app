@@ -99,12 +99,13 @@ class PacienteRepository extends Repository {
     async deleteById(id)    { return this._deleteById(id); }
 
     async search(q) {
+        const valor = `%${q}%`;
         const result = await db.execute(
             `SELECT * FROM pacientes
-             WHERE UPPER(nombres) LIKE UPPER(:q)
-                OR UPPER(apellidos) LIKE UPPER(:q)
-                OR telefono LIKE :q`,
-            [`%${q}%`]
+             WHERE UPPER(nombres)   LIKE UPPER(:1)
+                OR UPPER(apellidos) LIKE UPPER(:2)
+                OR telefono         LIKE :3`,
+            [valor, valor, valor]
         );
         return result.rows;
     }
